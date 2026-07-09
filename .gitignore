@@ -1,0 +1,59 @@
+# Орта айнымалалар
+.env
+.env.local
+.env.*.local
+
+# YouTube токены және ынамдар
+youtube_token.json
+client_secrets.json
+
+# Уақытша файлдар
+temp_voice.mp3
+result_audio.mp3
+TEMP_MPY_*.mp4
+final_video_no_subs.mp4
+final_shorts.mp4
+temp_sc.png
+backgrounds/_pexels_temp.mp4
+music/_openverse_temp.mp3
+
+# Логтар
+debug.log
+scheduler.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+voice_samples/

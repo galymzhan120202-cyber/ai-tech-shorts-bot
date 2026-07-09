@@ -1,0 +1,29 @@
+[
+  {
+    "file": "fallback1.mp3",
+    "title": "Urawa Ambient Music Part 3",
+    "creator": "Ambient Samurai - Ichiro NAKAGAWA",
+    "license": "by",
+    "license_version": "3.0",
+    "foreign_landing_url": "https://www.jamendo.com/track/1189635",
+    "duration_ms": 264000
+  },
+  {
+    "file": "fallback2.mp3",
+    "title": "sbatronico - insomnia",
+    "creator": "sbatronico",
+    "license": "by",
+    "license_version": "3.0",
+    "foreign_landing_url": "https://www.jamendo.com/track/1675391",
+    "duration_ms": 653000
+  },
+  {
+    "file": "fallback3.mp3",
+    "title": "運転する",
+    "creator": "Flex Blur",
+    "license": "by",
+    "license_version": "3.0",
+    "foreign_landing_url": "https://www.jamendo.com/track/1189405",
+    "duration_ms": 270000
+  }
+]
