@@ -364,6 +364,12 @@ def send_telegram(message: str):
     except Exception:
         pass
 
+def pick_rotating_tags(exclude_tags, count=5):
+    """STRONG_HASHTAG_POOL-дан exclude_tags-пен қайталанбайтын тегтерді таңдау."""
+    excluded = {t.lower() for t in exclude_tags.split()}
+    pool = [t for t in STRONG_HASHTAG_POOL if t.lower() not in excluded]
+    return ' '.join(random.sample(pool, min(count, len(pool))))
+
 def get_gemini_content():
     """Gemini-дан сценарий + тақырып + хештегтер алу"""
     logger.info("📝 Gemini-дан контент жазылуда...")
@@ -377,7 +383,7 @@ def get_gemini_content():
 
     topic, niche_tags = random.choice(TOPICS)
     hook_start = random.choice(HOOK_STARTERS)
-    rotating_tags = ' '.join(random.sample(STRONG_HASHTAG_POOL, 5))
+    rotating_tags = pick_rotating_tags(niche_tags)
 
     prompt = (
         f'Create viral YouTube Shorts content about {topic}.\n'
@@ -430,7 +436,8 @@ def get_gemini_content():
     logger.warning("⚠️ Gemini сәтсіз, резервтік контент қолданылуда")
     fallback_script = "Tech companies don't want you to know this — your phone is already using AI to predict your next move before you make it. It learns your habits from every tap, scroll and pause. That data trains the algorithms that keep you scrolling longer. Follow for more."
     fallback_title = "The AI Trick Hiding Inside Your Phone"
-    fallback_hashtags = f"#ai #aitools #technology #techfacts {' '.join(random.sample(STRONG_HASHTAG_POOL, 4))} #shorts"
+    fallback_niche = "#ai #aitools #technology #techfacts"
+    fallback_hashtags = f"{fallback_niche} {pick_rotating_tags(fallback_niche, 4)} #shorts"
     fallback_desc = f"{fallback_script}\n\n{fallback_hashtags}"
     return validate_script(fallback_script), fallback_title, fallback_desc, parse_hashtags_to_tags(fallback_hashtags)
 
@@ -567,7 +574,8 @@ def generate_video(script_override: str = None, skip_upload: bool = False):
         if script_override:
             script = validate_script(script_override)
             video_title = f"Tech Facts #shorts"
-            override_hashtags = f"#ai #technology #shorts #techfacts {' '.join(random.sample(STRONG_HASHTAG_POOL, 3))}"
+            override_niche = "#ai #technology #shorts #techfacts"
+            override_hashtags = f"{override_niche} {pick_rotating_tags(override_niche, 3)}"
             video_description = f"{script}\n\n{override_hashtags}"
             video_tags = parse_hashtags_to_tags(override_hashtags)
             logger.info("Жіберілген мәтін қолданылды")
