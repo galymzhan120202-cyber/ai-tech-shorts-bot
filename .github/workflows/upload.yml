@@ -54,7 +54,7 @@ jobs:
           VIDEO_FPS=24
           VIDEO_PRESET=ultrafast
           MIN_SCRIPT_LENGTH=20
-          MAX_SCRIPT_LENGTH=50
+          MAX_SCRIPT_LENGTH=110
           MAX_RETRIES=3
           RETRY_DELAY=2
           EOF

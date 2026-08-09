@@ -40,7 +40,9 @@ TELEGRAM_NOTIFY_CHAT_ID = os.getenv('TELEGRAM_NOTIFY_CHAT_ID', '')
 MAX_RETRIES = int(os.getenv('MAX_RETRIES', '3'))
 RETRY_DELAY = int(os.getenv('RETRY_DELAY', '2'))
 MIN_SCRIPT_LENGTH = int(os.getenv('MIN_SCRIPT_LENGTH', '20'))
-MAX_SCRIPT_LENGTH = int(os.getenv('MAX_SCRIPT_LENGTH', '50'))
+# 30-40 сек сөйлеу ~75-105 сөзге сай келеді (Gemini промпты соны сұрайды) —
+# бұрынғы 50 сөздік лимит сценарийді дерлік әр жолы кесіп тастайтын.
+MAX_SCRIPT_LENGTH = int(os.getenv('MAX_SCRIPT_LENGTH', '110'))
 
 # YouTube параметрлері (28 = Science & Technology)
 YOUTUBE_CATEGORY_ID = os.getenv('YOUTUBE_CATEGORY_ID', '28')
@@ -79,6 +81,24 @@ def sanitize_subtitle_text(text):
         text = text.replace(src, dst)
     return text
 
+def truncate_to_sentence(script, max_words):
+    """MAX_SCRIPT_LENGTH-тен асса, сөз ортасынан емес соңғы толық сөйлемнен
+    қысқарту. CTA ("Follow for more.") әрқашан сақталады — жарты сөйлеммен
+    аяқталған видео retention-ге зиян келтіреді."""
+    has_cta = script.rstrip().endswith("Follow for more.")
+    body = script.rsplit("Follow for more.", 1)[0].strip() if has_cta else script
+
+    words = body.split()
+    budget = max_words - 3 if has_cta else max_words
+    if len(words) > budget:
+        truncated = ' '.join(words[:budget])
+        last_period = truncated.rfind('.')
+        if last_period > len(truncated) * 0.5:
+            truncated = truncated[:last_period + 1]
+        body = truncated
+
+    return f"{body} Follow for more." if has_cta else body
+
 def validate_script(script):
     """Сценарийдің ұзындығы мен сапасын тексеру"""
     if not script or not script.strip():
@@ -91,8 +111,8 @@ def validate_script(script):
         raise ValueError(f"Сценарий тым қысқа ({word_count} сөз, мин. {MIN_SCRIPT_LENGTH})")
 
     if word_count > MAX_SCRIPT_LENGTH:
-        logger.warning(f"⚠️ Сценарий ұзын ({word_count} сөз), ажыратуы мүмкін")
-        script = ' '.join(script.split()[:MAX_SCRIPT_LENGTH])
+        logger.warning(f"⚠️ Сценарий ұзын ({word_count} сөз), сөйлем шекарасынан қысқартылады")
+        script = truncate_to_sentence(script, MAX_SCRIPT_LENGTH)
 
     return script
 
@@ -174,6 +194,19 @@ TOPICS = [
     ("hidden iphone settings almost nobody knows", "#iphone #techfacts #phonehacks"),
     ("the smart home gadget that changes everything", "#smarthome #gadgets #technology"),
     ("gadgets tech reviewers don't want you to skip", "#gadgets #technology #techreview"),
+
+    # --- Real numbers & disasters (best historical performers — concrete
+    # figures/stories outperform vague hooks like "billionaires' secret") ---
+    ("the coding bug that cost a company $440 million in 45 minutes", "#coding #programming #techfacts"),
+    ("the $125 million rocket that was lost because of one line of code", "#spacetech #coding #nasa"),
+    ("the hard drive that weighed over a ton but stored only 5 megabytes", "#techfacts #technology #history"),
+    ("the typo that deleted a company's entire production database", "#coding #programming #techfacts"),
+    ("how one bug shut down the New York Stock Exchange for hours", "#techfacts #coding #bigtech"),
+    ("the number of lines of code it took to land humans on the moon", "#spacetech #coding #nasa"),
+    ("the AI city being built in space right now", "#spacetech #ai #futuretech"),
+    ("the 1 typo that took down half the internet for an hour", "#techfacts #coding #bigtech"),
+    ("the software glitch that cost NASA a $327 million Mars orbiter", "#spacetech #nasa #techfacts"),
+    ("the bank error that accidentally sent $900 million to strangers", "#techfacts #bigtech #technology"),
 ]
 
 HOOK_STARTERS = [
@@ -191,6 +224,26 @@ STRONG_HASHTAG_POOL = [
     "#trending", "#viral", "#fyp", "#futuretech", "#artificialintelligence",
     "#innovation", "#gadgets", "#technews", "#sciencefacts", "#mindblown",
     "#explore", "#didyouknow",
+]
+
+# Gemini толығымен сәтсіз болғанда қолданылатын резервтік нұсқалар (бірнешеу —
+# бірыңғай статикалық fallback арнада дәл бірдей видео 2 рет шығуына әкелген).
+FALLBACK_CONTENTS = [
+    {
+        "script": "Tech companies don't want you to know this — your phone is already using AI to predict your next move before you make it. It learns your habits from every tap, scroll and pause. That data trains the algorithms that keep you scrolling longer. Follow for more.",
+        "title": "The AI Trick Hiding Inside Your Phone",
+        "niche": "#ai #aitools #technology #techfacts",
+    },
+    {
+        "script": "Nobody is talking about this, but a single bad code deploy once cost a company four hundred forty million dollars in under an hour. No hackers, no years-old bug — just one unchecked release. It's proof that in tech, small mistakes scale fast. Follow for more.",
+        "title": "The Coding Mistake That Cost $440 Million",
+        "niche": "#coding #programming #techfacts",
+    },
+    {
+        "script": "Scientists just revealed that early hard drives the size of a refrigerator stored less data than a single photo on your phone today. One model weighed over a ton and held just five megabytes. Technology has grown faster than almost anyone predicted. Follow for more.",
+        "title": "The 1-Ton Hard Drive That Held Only 5MB",
+        "niche": "#techfacts #technology #history",
+    },
 ]
 
 TECH_VISUAL_QUERIES = [
@@ -370,7 +423,33 @@ def pick_rotating_tags(exclude_tags, count=5):
     pool = [t for t in STRONG_HASHTAG_POOL if t.lower() not in excluded]
     return ' '.join(random.sample(pool, min(count, len(pool))))
 
-def get_gemini_content():
+TOPIC_STOPWORDS = {
+    "the", "a", "an", "of", "in", "on", "to", "your", "you", "that", "this",
+    "is", "are", "will", "for", "and", "by", "right", "now", "one", "you're",
+}
+
+def _topic_keywords(text):
+    return {w for w in re.findall(r"[a-z']+", text.lower()) if w not in TOPIC_STOPWORDS and len(w) > 3}
+
+def pick_fresh_topic(recent_titles, attempts=6):
+    """TOPICS-тен соңғы жүктелген видео атауларымен тым ұқсамайтын тақырып
+    таңдау (2+ маңызды сөз сәйкес келсе — қайталанады деп есептеледі).
+    Мақсат — "phone reads your mind" секілді тақырыптың қатарынан 2 рет
+    шығып кетуін болдырмау."""
+    recent_word_sets = [_topic_keywords(t) for t in recent_titles]
+    if not recent_word_sets:
+        return random.choice(TOPICS)
+
+    for _ in range(attempts):
+        topic, niche_tags = random.choice(TOPICS)
+        topic_words = _topic_keywords(topic)
+        collision = any(len(topic_words & rw) >= 2 for rw in recent_word_sets)
+        if not collision:
+            return topic, niche_tags
+
+    return random.choice(TOPICS)
+
+def get_gemini_content(recent_titles=None):
     """Gemini-дан сценарий + тақырып + хештегтер алу"""
     logger.info("📝 Gemini-дан контент жазылуда...")
 
@@ -381,7 +460,7 @@ def get_gemini_content():
         f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={GEMINI_API_KEY}",
     ]
 
-    topic, niche_tags = random.choice(TOPICS)
+    topic, niche_tags = pick_fresh_topic(recent_titles or [])
     hook_start = random.choice(HOOK_STARTERS)
     rotating_tags = pick_rotating_tags(niche_tags)
 
@@ -391,9 +470,13 @@ def get_gemini_content():
         'Respond ONLY in this exact JSON format (no extra text, no markdown):\n'
         '{"script": "...", "title": "...", "hashtags": "..."}\n\n'
         'Rules:\n'
-        f'- script: Start with "{hook_start}" as a shocking hook. Then 2-3 sentences of the fact. End with "Follow for more." No emojis. 30-40 seconds of speech.\n'
-        '- title: Under 55 characters. Start with a number or power word. Must grab attention. Do NOT include hashtags in title.\n'
-        '  Good examples: "3 AI Tools That Feel Illegal to Know" / "The Real Reason Your Phone Battery Dies Fast"\n'
+        f'- script: Start with "{hook_start}" as a shocking hook. The hook must include a specific number, '
+        'dollar amount, or concrete statistic whenever the topic allows it (e.g. "$125 million", "1 ton", "47%") '
+        '— concrete numbers consistently outperform vague claims like "secret" or "changes everything" with no specifics. '
+        'Then 2-3 sentences of the fact, building on that concrete detail. End with "Follow for more." No emojis. '
+        '30-40 seconds of speech (75-100 words).\n'
+        '- title: Under 55 characters. Start with a number or a concrete figure when possible. Must grab attention. Do NOT include hashtags in title.\n'
+        '  Good examples: "The Bug That Cost $440 Million" / "1 Ton Hard Drive Held Only 5MB"\n'
         f'- hashtags: Write exactly in this format (9 tags total, keep #shorts always):\n'
         f'  {niche_tags} {rotating_tags} #shorts\n'
         '  Replace only the first 3 niche tags if needed to match the specific video topic. Keep the rest exactly as given.'
@@ -434,12 +517,15 @@ def get_gemini_content():
             logger.warning(f"⚠️ {model_name} қатесі: {str(e)[:100]}")
 
     logger.warning("⚠️ Gemini сәтсіз, резервтік контент қолданылуда")
-    fallback_script = "Tech companies don't want you to know this — your phone is already using AI to predict your next move before you make it. It learns your habits from every tap, scroll and pause. That data trains the algorithms that keep you scrolling longer. Follow for more."
-    fallback_title = "The AI Trick Hiding Inside Your Phone"
-    fallback_niche = "#ai #aitools #technology #techfacts"
-    fallback_hashtags = f"{fallback_niche} {pick_rotating_tags(fallback_niche, 4)} #shorts"
-    fallback_desc = f"{fallback_script}\n\n{fallback_hashtags}"
-    return validate_script(fallback_script), fallback_title, fallback_desc, parse_hashtags_to_tags(fallback_hashtags)
+    fallback = random.choice(FALLBACK_CONTENTS)
+    fallback_hashtags = f"{fallback['niche']} {pick_rotating_tags(fallback['niche'], 4)} #shorts"
+    fallback_desc = f"{fallback['script']}\n\n{fallback_hashtags}"
+    return (
+        validate_script(fallback['script']),
+        fallback['title'],
+        fallback_desc,
+        parse_hashtags_to_tags(fallback_hashtags),
+    )
 
 def parse_hashtags_to_tags(hashtags_str):
     """'#ai #shorts #fyp' секілді хэштег жолын YouTube tags[] өрісіне сай
@@ -452,6 +538,40 @@ def parse_hashtags_to_tags(hashtags_str):
             seen.add(clean.lower())
             tags.append(clean)
     return tags
+
+def get_recent_channel_titles(max_results=15):
+    """Арнаға соңғы жүктелген видеолардың атауларын YouTube API арқылы алу
+    (тақырып қайталанбауын тексеру үшін — pick_fresh_topic соны қолданады).
+    Токен жоқ/сәтсіз болса — бос тізім қайтарады (video generation бұғатталмайды)."""
+    scopes = ["https://www.googleapis.com/auth/youtube.upload"]
+    token_file = os.path.join(base_dir, "youtube_token.json")
+
+    if not os.path.exists(token_file):
+        return []
+
+    try:
+        credentials = Credentials.from_authorized_user_file(token_file, scopes)
+        if credentials.expired and credentials.refresh_token:
+            credentials.refresh(Request())
+
+        youtube = googleapiclient.discovery.build("youtube", "v3", credentials=credentials)
+        channels_response = youtube.channels().list(part="contentDetails", mine=True).execute()
+        items = channels_response.get("items", [])
+        if not items:
+            return []
+
+        uploads_playlist_id = items[0]["contentDetails"]["relatedPlaylists"]["uploads"]
+        playlist_response = youtube.playlistItems().list(
+            part="snippet", playlistId=uploads_playlist_id, maxResults=max_results
+        ).execute()
+
+        titles = [item["snippet"]["title"] for item in playlist_response.get("items", [])]
+        logger.info(f"✓ Соңғы {len(titles)} видео атауы алынды (дубляж тексеру үшін)")
+        return titles
+
+    except Exception as e:
+        logger.warning(f"⚠️ Соңғы видео атауларын алу сәтсіз: {str(e)[:100]}")
+        return []
 
 def upload_to_youtube(video_path, title, description, tags=None):
     logger.info("📤 YouTube-ке жүктеу басталуда...")
@@ -580,7 +700,10 @@ def generate_video(script_override: str = None, skip_upload: bool = False):
             video_tags = parse_hashtags_to_tags(override_hashtags)
             logger.info("Жіберілген мәтін қолданылды")
         else:
-            script, video_title, video_description, video_tags = retry_with_backoff(get_gemini_content)
+            recent_titles = get_recent_channel_titles()
+            script, video_title, video_description, video_tags = retry_with_backoff(
+                lambda: get_gemini_content(recent_titles)
+            )
 
         logger.info(f"📝 Сценарий: {script[:80]}...")
         logger.info(f"🏷️ Тақырып: {video_title}")
